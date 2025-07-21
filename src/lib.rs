@@ -46,10 +46,8 @@ pub enum LargeFileDigestResult<T> {
 #[derive(Clone, Default, Deserialize, Serialize, clap::ValueEnum)]
 #[clap(rename_all = "kebab-case")]
 pub enum HashType {
-    #[clap(name = "64")]
     XxHash3_64,
     #[default]
-    #[clap(name = "128")]
     XxHash3_128,
 }
 

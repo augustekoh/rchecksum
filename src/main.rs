@@ -12,7 +12,7 @@ use rchecksum::HashType;
 #[derive(Parser)]
 #[command(about, version)]
 struct Args {
-    #[arg(long = "base-algo")]
+    #[arg(long = "base-algo", default_value_t, value_enum)]
     base_hash_algo: HashType,
 
     #[arg(
