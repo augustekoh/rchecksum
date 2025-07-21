@@ -1,8 +1,11 @@
-use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
-use twox_hash::XxHash3_64;
+
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+use serde::{Deserialize, Serialize};
+use twox_hash::{XxHash3_64, XxHash3_128};
 use walkdir::WalkDir;
 
 
@@ -40,8 +43,17 @@ pub enum LargeFileDigestResult<T> {
     NotFinal(Vec<T>),
 }
 
+#[derive(Clone, Default, Deserialize, Serialize, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum HashType {
+    #[clap(name = "64")]
+    XxHash3_64,
+    #[default]
+    #[clap(name = "128")]
+    XxHash3_128,
+}
 
-pub fn directory_recurse_checksum(dirpath: &PathBuf) -> Vec<u8> {
+pub fn directory_recurse_checksum(dirpath: &PathBuf, hash_type: &HashType) -> Vec<u8> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(MAX_THREADS)
         .build()
@@ -57,7 +69,7 @@ pub fn directory_recurse_checksum(dirpath: &PathBuf) -> Vec<u8> {
         entries
             .into_par_iter()
             .for_each_with(sender, |s, e| {
-                s.send(file_checksum(&e.path())).unwrap();
+                s.send(file_checksum(&e.path(), hash_type)).unwrap();
             });
         receiver
             .iter()
@@ -73,27 +85,30 @@ pub fn directory_recurse_checksum(dirpath: &PathBuf) -> Vec<u8> {
     result
 }
 
-pub fn file_checksum(fpath: &Path) -> Vec<u8> {
+pub fn file_checksum(fpath: &Path, hash_type: &HashType) -> Vec<u8> {
     let file = std::fs::File::open(fpath).unwrap();
 
     // This first separate processing is separate from the loop. A Chunkedfile instance is processed, not a Vec<Vec<_>>.
-    let mut input_content = match large_content_block_digest(ChunkedFile::new(file)) {
+    let mut input_content = match large_content_block_digest(ChunkedFile::new(file), hash_type) {
         LargeFileDigestResult::NotFinal(result) => { result.into_iter() },
         LargeFileDigestResult::Final(result) => { return result; },
     };
     loop {
-        input_content = match large_content_block_digest(input_content) {
+        input_content = match large_content_block_digest(input_content, hash_type) {
             LargeFileDigestResult::NotFinal(result) => { result.into_iter() },
             LargeFileDigestResult::Final(result) => { return result; },
         }
     }
 }
 
-fn checksum(content: &Vec<u8>) -> Vec<u8> {
-    XxHash3_64::oneshot(&content).to_le_bytes().into()
+fn checksum(content: &Vec<u8>, hash_type: &HashType) -> Vec<u8> {
+    match hash_type {
+        &HashType::XxHash3_64 => XxHash3_64::oneshot(&content).to_le_bytes().into(),
+        &HashType::XxHash3_128 => XxHash3_128::oneshot(&content).to_le_bytes().into(),
+    }
 }
 
-pub fn large_content_block_digest<T>(mut iter: T) -> LargeFileDigestResult<Vec<u8>>
+pub fn large_content_block_digest<T>(mut iter: T, hash_type: &HashType) -> LargeFileDigestResult<Vec<u8>>
 where
     T: Iterator<Item = Vec<u8>> + Send,
 {
@@ -102,12 +117,12 @@ where
     if let Some(c) = iter.next() {
         chunk = c;
     } else {
-        return LargeFileDigestResult::Final(checksum(&vec![]));
+        return LargeFileDigestResult::Final(checksum(&vec![], hash_type));
     }
     loop {
         let (chunk_candidate, res) = rayon::join(
             || iter.next(),
-            || checksum(&chunk),
+            || checksum(&chunk, hash_type),
         );
         block_checksums.push(res);
         if let Some(c) = chunk_candidate {
@@ -145,7 +160,10 @@ mod tests {
         // XXH3_2d06800538d394c2  /tmp/zshSnJatY
         let mut expected = vec![0x2d, 0x06, 0x80, 0x05, 0x38, 0xd3, 0x94, 0xc2];
         expected.reverse();
-        if let LargeFileDigestResult::Final(actual) = large_content_block_digest(vec![].into_iter()) {
+        if let LargeFileDigestResult::Final(actual) = large_content_block_digest(
+            vec![].into_iter(),
+            &HashType::XxHash3_64,
+        ) {
             assert_eq!(actual, expected);
         } else {
             panic!();
@@ -156,7 +174,10 @@ mod tests {
     fn test_content_checksum(content: Vec<Vec<u8>>, expected: Vec<u8>) {
         let mut expected = expected.clone();
         expected.reverse();
-        if let LargeFileDigestResult::Final(actual) = large_content_block_digest(content.into_iter()) {
+        if let LargeFileDigestResult::Final(actual) = large_content_block_digest(
+            content.into_iter(),
+            &HashType::XxHash3_64,
+        ) {
             assert_eq!(actual, expected);
         } else {
             panic!();
