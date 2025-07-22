@@ -109,23 +109,33 @@ pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &Fi
 
     match filepath_sensitive {
         FilepathSensitivity::AsIs | FilepathSensitivity::AsUnicode | FilepathSensitivity::AsUnicodeLowercase => {
-            let fpath_checksums: Vec<_> = fpath.iter().map(|p| {
-                let fname_bytes = p.to_os_string();
-                let fname_bytes = match filepath_sensitive {
-                    FilepathSensitivity::AsIs => fname_bytes.into_encoded_bytes(),
-                    FilepathSensitivity::AsUnicode => fname_bytes
-                        .into_string()
-                        .expect("Failed to convert to unicode string.")
-                        .into(),
-                    FilepathSensitivity::AsUnicodeLowercase => fname_bytes
-                        .into_string()
-                        .expect("Failed to convert to unicode string.")
-                        .to_lowercase()
-                        .into(),
-                    _ => unreachable!(),
-                };
-                tree_hash(fname_bytes, hash_type)
-            }).collect();
+            let fpath_checksums: Vec<_> = fpath
+                .components()
+                .filter(|p| {
+                    match p {
+                        std::path::Component::CurDir => false,
+                        std::path::Component::ParentDir => unimplemented!(),
+                        _ => true,
+                    }
+                })
+                .map(|p| {
+                    let fname_bytes = p.as_os_str().to_os_string();
+                    let fname_bytes = match filepath_sensitive {
+                        FilepathSensitivity::AsIs => fname_bytes.into_encoded_bytes(),
+                        FilepathSensitivity::AsUnicode => fname_bytes
+                            .into_string()
+                            .expect("Failed to convert to unicode string.")
+                            .into(),
+                        FilepathSensitivity::AsUnicodeLowercase => fname_bytes
+                            .into_string()
+                            .expect("Failed to convert to unicode string.")
+                            .to_lowercase()
+                            .into(),
+                        _ => unreachable!(),
+                    };
+                    tree_hash(fname_bytes, hash_type)
+                })
+                .collect();
             let fname_checksum = tree_hash_chunks(fpath_checksums.into_iter(), hash_type);
             tree_hash_chunks(vec![fname_checksum, content_checksum].into_iter(), hash_type)
         }
