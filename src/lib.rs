@@ -61,8 +61,8 @@ pub enum FilepathSensitivity {
     None,
     #[default]
     AsIs,
-    AsUnicode,
-    AsUnicodeLowercase,
+    Unicode,
+    UnicodeLowercase,
 }
 
 fn zero_checksum(hash_type: &HashType) -> Vec<u8> {
@@ -108,7 +108,7 @@ pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &Fi
     let content_checksum = file_content_checksum(fpath, hash_type);
 
     match filepath_sensitive {
-        FilepathSensitivity::AsIs | FilepathSensitivity::AsUnicode | FilepathSensitivity::AsUnicodeLowercase => {
+        FilepathSensitivity::AsIs | FilepathSensitivity::Unicode | FilepathSensitivity::UnicodeLowercase => {
             let fpath_checksums: Vec<_> = fpath
                 .components()
                 .filter(|p| {
@@ -122,11 +122,11 @@ pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &Fi
                     let fname_bytes = p.as_os_str().to_os_string();
                     let fname_bytes = match filepath_sensitive {
                         FilepathSensitivity::AsIs => fname_bytes.into_encoded_bytes(),
-                        FilepathSensitivity::AsUnicode => fname_bytes
+                        FilepathSensitivity::Unicode => fname_bytes
                             .into_string()
                             .expect("Failed to convert to unicode string.")
                             .into(),
-                        FilepathSensitivity::AsUnicodeLowercase => fname_bytes
+                        FilepathSensitivity::UnicodeLowercase => fname_bytes
                             .into_string()
                             .expect("Failed to convert to unicode string.")
                             .to_lowercase()
