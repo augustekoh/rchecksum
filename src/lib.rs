@@ -45,13 +45,32 @@ pub enum LargeFileDigestResult<T> {
 
 #[derive(Clone, Default, Deserialize, Serialize, clap::ValueEnum)]
 #[clap(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum HashType {
     XxHash3_64,
     #[default]
     XxHash3_128,
 }
 
-pub fn directory_recurse_checksum(dirpath: &PathBuf, hash_type: &HashType) -> Vec<u8> {
+#[derive(Clone, Default, Deserialize, Serialize, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
+pub enum FilepathSensitive {
+    // Warning: the `No` case has a special property. If you have a directory where any file (or file within any
+    // subfolder) has a corresponding file with the same content, then the XOR operation used will result in a hash
+    // value of zero. This is avoided if we are sensitive to the file path, as no two files can have the same path.
+    No,
+    #[default]
+    AsIs,
+    AsUnicode,
+    AsUnicodeLowercase,
+}
+
+pub fn directory_recurse_checksum(
+    dirpath: &PathBuf,
+    hash_type: &HashType,
+    filepath_sensitive: &FilepathSensitive,
+) -> Vec<u8> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(MAX_THREADS)
         .build()
@@ -67,7 +86,7 @@ pub fn directory_recurse_checksum(dirpath: &PathBuf, hash_type: &HashType) -> Ve
         entries
             .into_par_iter()
             .for_each_with(sender, |s, e| {
-                s.send(file_checksum(&e.path(), hash_type)).unwrap();
+                s.send(file_checksum(&e.path(), hash_type, filepath_sensitive)).unwrap();
             });
         receiver
             .iter()
@@ -83,11 +102,51 @@ pub fn directory_recurse_checksum(dirpath: &PathBuf, hash_type: &HashType) -> Ve
     result
 }
 
-pub fn file_checksum(fpath: &Path, hash_type: &HashType) -> Vec<u8> {
-    let file = std::fs::File::open(fpath).unwrap();
+pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &FilepathSensitive) -> Vec<u8> {
+    let content_checksum = file_content_checksum(fpath, hash_type);
 
-    // This first separate processing is separate from the loop. A Chunkedfile instance is processed, not a Vec<Vec<_>>.
-    let mut input_content = match large_content_block_digest(ChunkedFile::new(file), hash_type) {
+    match filepath_sensitive {
+        FilepathSensitive::AsIs | FilepathSensitive::AsUnicode | FilepathSensitive::AsUnicodeLowercase => {
+            let fpath_checksums: Vec<_> = fpath.iter().map(|p| {
+                let fname_bytes = p.to_os_string();
+                let fname_bytes = match filepath_sensitive {
+                    FilepathSensitive::AsIs => fname_bytes.into_encoded_bytes(),
+                    FilepathSensitive::AsUnicode => fname_bytes
+                        .into_string()
+                        .expect("Failed to convert to unicode string.")
+                        .into(),
+                    FilepathSensitive::AsUnicodeLowercase => fname_bytes
+                        .into_string()
+                        .expect("Failed to convert to unicode string.")
+                        .to_lowercase()
+                        .into(),
+                    _ => unreachable!(),
+                };
+                tree_hash(fname_bytes, hash_type)
+            }).collect();
+            let fname_checksum = tree_hash_chunks(fpath_checksums.into_iter(), hash_type);
+            tree_hash_chunks(vec![fname_checksum, content_checksum].into_iter(), hash_type)
+        }
+        FilepathSensitive::No => content_checksum,
+    }
+}
+
+pub fn file_content_checksum(fpath: &Path, hash_type: &HashType) -> Vec<u8> {
+    let file = std::fs::File::open(fpath).unwrap();
+    tree_hash_chunks(ChunkedFile::new(file), hash_type)
+}
+
+pub fn tree_hash(content: Vec<u8>, hash_type: &HashType) -> Vec<u8> {
+    tree_hash_chunks(content.chunks(CHUNK_SIZE).map(|e| e.to_vec()), hash_type)
+}
+
+pub fn tree_hash_chunks<T>(content: T, hash_type: &HashType) -> Vec<u8>
+where
+    T: Iterator<Item = Vec<u8>> + Send,
+{
+    // This first separate processing is separate from the loop in case `content` has a different datatype than
+    // `input_content`.
+    let mut input_content = match large_content_block_digest(content, hash_type) {
         LargeFileDigestResult::NotFinal(result) => { result.into_iter() },
         LargeFileDigestResult::Final(result) => { return result; },
     };
