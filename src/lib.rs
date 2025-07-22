@@ -66,6 +66,10 @@ pub enum FilepathSensitive {
     AsUnicodeLowercase,
 }
 
+fn zero_checksum(hash_type: &HashType) -> Vec<u8> {
+    checksum(&vec![], hash_type)
+}
+
 pub fn directory_recurse_checksum(
     dirpath: &PathBuf,
     hash_type: &HashType,
@@ -90,14 +94,13 @@ pub fn directory_recurse_checksum(
             });
         receiver
             .iter()
-            .reduce(|acc, x| {
+            .fold(zero_checksum(hash_type), |acc, x| {
                 acc
                     .iter()
                     .zip(x)
                     .map(|(x1, x2)| x1 ^ x2)
                     .collect()
             })
-            .unwrap()
     });
     result
 }
@@ -174,7 +177,7 @@ where
     if let Some(c) = iter.next() {
         chunk = c;
     } else {
-        return LargeFileDigestResult::Final(checksum(&vec![], hash_type));
+        return LargeFileDigestResult::Final(zero_checksum(hash_type));
     }
     loop {
         let (chunk_candidate, res) = rayon::join(
