@@ -1,4 +1,3 @@
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
@@ -55,11 +54,11 @@ pub enum HashType {
 #[derive(Clone, Default, Deserialize, Serialize, clap::ValueEnum)]
 #[clap(rename_all = "kebab-case")]
 #[serde(rename_all = "snake_case")]
-pub enum FilepathSensitive {
+pub enum FilepathSensitivity {
     // Warning: the `No` case has a special property. If you have a directory where any file (or file within any
     // subfolder) has a corresponding file with the same content, then the XOR operation used will result in a hash
     // value of zero. This is avoided if we are sensitive to the file path, as no two files can have the same path.
-    No,
+    None,
     #[default]
     AsIs,
     AsUnicode,
@@ -73,7 +72,7 @@ fn zero_checksum(hash_type: &HashType) -> Vec<u8> {
 pub fn directory_recurse_checksum(
     dirpath: &PathBuf,
     hash_type: &HashType,
-    filepath_sensitive: &FilepathSensitive,
+    filepath_sensitive: &FilepathSensitivity,
 ) -> Vec<u8> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(MAX_THREADS)
@@ -105,20 +104,20 @@ pub fn directory_recurse_checksum(
     result
 }
 
-pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &FilepathSensitive) -> Vec<u8> {
+pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &FilepathSensitivity) -> Vec<u8> {
     let content_checksum = file_content_checksum(fpath, hash_type);
 
     match filepath_sensitive {
-        FilepathSensitive::AsIs | FilepathSensitive::AsUnicode | FilepathSensitive::AsUnicodeLowercase => {
+        FilepathSensitivity::AsIs | FilepathSensitivity::AsUnicode | FilepathSensitivity::AsUnicodeLowercase => {
             let fpath_checksums: Vec<_> = fpath.iter().map(|p| {
                 let fname_bytes = p.to_os_string();
                 let fname_bytes = match filepath_sensitive {
-                    FilepathSensitive::AsIs => fname_bytes.into_encoded_bytes(),
-                    FilepathSensitive::AsUnicode => fname_bytes
+                    FilepathSensitivity::AsIs => fname_bytes.into_encoded_bytes(),
+                    FilepathSensitivity::AsUnicode => fname_bytes
                         .into_string()
                         .expect("Failed to convert to unicode string.")
                         .into(),
-                    FilepathSensitive::AsUnicodeLowercase => fname_bytes
+                    FilepathSensitivity::AsUnicodeLowercase => fname_bytes
                         .into_string()
                         .expect("Failed to convert to unicode string.")
                         .to_lowercase()
@@ -130,7 +129,7 @@ pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &Fi
             let fname_checksum = tree_hash_chunks(fpath_checksums.into_iter(), hash_type);
             tree_hash_chunks(vec![fname_checksum, content_checksum].into_iter(), hash_type)
         }
-        FilepathSensitive::No => content_checksum,
+        FilepathSensitivity::None => content_checksum,
     }
 }
 

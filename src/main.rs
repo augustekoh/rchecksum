@@ -6,14 +6,14 @@ use clap::{crate_version, crate_name};
 use serde::{Deserialize, Serialize};
 use serde_json;
 
-use rchecksum::{FilepathSensitive, HashType};
+use rchecksum::{FilepathSensitivity, HashType};
 
 
 #[derive(Parser)]
 #[command(about, version)]
 struct Args {
-    #[arg(long = "fname-sensitive", short = 'n', default_value_t, value_enum)]
-    filename_sensitive: FilepathSensitive,
+    #[arg(long = "fpath-mode", short = 'n', default_value_t, value_enum)]
+    filepath_sensitivity: FilepathSensitivity,
 
     #[arg(long = "base-algo", default_value_t, value_enum)]
     base_hash_algo: HashType,
@@ -35,7 +35,7 @@ struct FinalResult {
 struct SingleChecksumResult {
     #[serde(rename = "type")]
     type_: String,
-    fpath_mode: FilepathSensitive,
+    fpath_mode: FilepathSensitivity,
     base_algo: HashType,
     version: String,
     hash: String,
@@ -53,11 +53,11 @@ fn main() {
     let mut final_result = FinalResult::new();
 
     for path in args.paths {
-        let checksum = rchecksum::directory_recurse_checksum(&path, &args.base_hash_algo, &args.filename_sensitive);
+        let checksum = rchecksum::directory_recurse_checksum(&path, &args.base_hash_algo, &args.filepath_sensitivity);
         let hash_string: String = checksum.into_iter().rev().map(|b| format!("{b:x}")).collect::<Vec<_>>().join("");
         final_result.hashes.insert(path, SingleChecksumResult {
             type_: crate_name!().to_string(),
-            fpath_mode: args.filename_sensitive.clone(),
+            fpath_mode: args.filepath_sensitivity.clone(),
             base_algo: args.base_hash_algo.clone(),
             version: crate_version!().to_string(),
             hash: hash_string,
