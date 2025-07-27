@@ -55,9 +55,11 @@ pub enum HashType {
 #[clap(rename_all = "kebab-case")]
 #[serde(rename_all = "snake_case")]
 pub enum FilepathSensitivity {
-    // Warning: the `No` case has a special property. If you have a directory where any file (or file within any
+    // Warning: the `None` case has a special property. If you have a directory where any file (or file within any
     // subfolder) has a corresponding file with the same content, then the XOR operation used will result in a hash
     // value of zero. This is avoided if we are sensitive to the file path, as no two files can have the same path.
+    // Consider using wrapping_add instead of XOR. Essentially, the binary operation should be both *comutative*
+    // and *associative* in order for the result of 3 or more hashes combined to be permutation invariant.
     None,
     #[default]
     AsIs,
