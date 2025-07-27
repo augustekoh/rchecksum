@@ -86,24 +86,27 @@ pub fn directory_recurse_checksum(
         .par_bridge()
         .map(|e| e.unwrap())
         .filter(|e| e.metadata().unwrap().is_file());
-    let result = pool.install(|| {
+    pool.install(|| {
         let (sender, receiver) = channel();
         entries
             .into_par_iter()
             .for_each_with(sender, |s, e| {
-                s.send(file_checksum(&e.path(), hash_type, filepath_sensitive)).unwrap();
+                let hash = file_checksum(&e.path(), hash_type, filepath_sensitive);
+                s.send(hash).unwrap();
             });
         receiver
             .iter()
-            .fold(zero_checksum(hash_type), |acc, x| {
-                acc
-                    .iter()
-                    .zip(x)
-                    .map(|(x1, x2)| x1 ^ x2)
-                    .collect()
-            })
-    });
-    result
+            .fold(
+                zero_checksum(hash_type),
+                |acc, x| {
+                    acc
+                        .iter()
+                        .zip(x)
+                        .map(|(x1, x2)| x1 ^ x2)
+                        .collect()
+                },
+            )
+    })
 }
 
 pub fn file_checksum(fpath: &Path, hash_type: &HashType, filepath_sensitive: &FilepathSensitivity) -> Vec<u8> {
